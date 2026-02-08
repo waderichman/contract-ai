@@ -4,6 +4,81 @@ import pdfParse from "pdf-parse";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+type AnalysisResult = {
+  plain_summary: string[];
+  obligations: string[];
+  risks: string[];
+  deadlines: string[];
+  uncertainty_note?: string;
+};
+
+const emptyAnalysis = (): AnalysisResult => ({
+  plain_summary: [],
+  obligations: [],
+  risks: [],
+  deadlines: [],
+});
+
+const parseAnalysisJson = (content: string | null | undefined): AnalysisResult => {
+  if (!content) return emptyAnalysis();
+
+  const trimmed = content.trim();
+  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+  const candidate = jsonMatch?.[0] || trimmed;
+
+  try {
+    const parsed = JSON.parse(candidate);
+    return {
+      plain_summary: Array.isArray(parsed?.plain_summary)
+        ? parsed.plain_summary.map(String)
+        : [],
+      obligations: Array.isArray(parsed?.obligations)
+        ? parsed.obligations.map(String)
+        : [],
+      risks: Array.isArray(parsed?.risks) ? parsed.risks.map(String) : [],
+      deadlines: Array.isArray(parsed?.deadlines)
+        ? parsed.deadlines.map(String)
+        : [],
+      uncertainty_note:
+        typeof parsed?.uncertainty_note === "string"
+          ? parsed.uncertainty_note
+          : undefined,
+    };
+  } catch {
+    return emptyAnalysis();
+  }
+};
+
+const toSummaryText = (analysis: AnalysisResult): string => {
+  const lines: string[] = [];
+
+  lines.push("Plain-English Summary");
+  if (analysis.plain_summary.length === 0) lines.push("- No summary returned.");
+  lines.push(...analysis.plain_summary.map((item) => `- ${item}`));
+  lines.push("");
+
+  lines.push("Key Obligations");
+  if (analysis.obligations.length === 0) lines.push("- None identified.");
+  lines.push(...analysis.obligations.map((item) => `- ${item}`));
+  lines.push("");
+
+  lines.push("Risks or Red Flags");
+  if (analysis.risks.length === 0) lines.push("- None identified.");
+  lines.push(...analysis.risks.map((item) => `- ${item}`));
+  lines.push("");
+
+  lines.push("Important Dates or Deadlines");
+  if (analysis.deadlines.length === 0) lines.push("- None identified.");
+  lines.push(...analysis.deadlines.map((item) => `- ${item}`));
+
+  if (analysis.uncertainty_note) {
+    lines.push("");
+    lines.push(`Note: ${analysis.uncertainty_note}`);
+  }
+
+  return lines.join("\n");
+};
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -99,11 +174,19 @@ ${chunks[i]}
     const finalPrompt = `
 You are a legal assistant.
 
-Using the section summaries below, produce a single coherent output with:
-1. Plain-English summary
-2. Key obligations
-3. Risks or red flags
-4. Important dates or deadlines
+Using the section summaries below, produce a single coherent JSON object with this exact shape:
+{
+  "plain_summary": string[],
+  "obligations": string[],
+  "risks": string[],
+  "deadlines": string[],
+  "uncertainty_note": string
+}
+
+Rules:
+- Return JSON only. No markdown.
+- Keep each array concise with clear, non-duplicate bullets.
+- Set "uncertainty_note" to "" if nothing is uncertain.
 
 Be concise and remove duplicates.
 ${wasTruncated ? "Note: Some sections were omitted due to size; mention uncertainty.\n" : ""}
@@ -121,9 +204,16 @@ ${chunkSummaries.join("\n\n")}
       2_000
     );
 
-    const summary =
-      finalResponse.choices[0].message?.content || "No summary.";
-    return NextResponse.json({ summary, truncated: wasTruncated });
+    const rawContent = finalResponse.choices[0].message?.content || "";
+    const analysis = parseAnalysisJson(rawContent);
+    const summary = toSummaryText(analysis);
+    return NextResponse.json({
+      summary,
+      analysis,
+      truncated: wasTruncated,
+      analyzedSections: chunks.length,
+      totalSections: allChunks.length,
+    });
   } catch (err) {
     console.error("API route error:", err);
     return NextResponse.json({ summary: "Error processing file." });

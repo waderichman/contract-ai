@@ -1,11 +1,45 @@
 "use client";
-import { useState } from "react";
+
+import { useMemo, useState } from "react";
+
+type AnalysisResult = {
+  plain_summary: string[];
+  obligations: string[];
+  risks: string[];
+  deadlines: string[];
+  uncertainty_note?: string;
+};
+
+type ApiResponse = {
+  summary?: string;
+  analysis?: AnalysisResult;
+  truncated?: boolean;
+  analyzedSections?: number;
+  totalSections?: number;
+};
+
+const emptyAnalysis: AnalysisResult = {
+  plain_summary: [],
+  obligations: [],
+  risks: [],
+  deadlines: [],
+  uncertainty_note: "",
+};
 
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState("");
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const [analyzedSections, setAnalyzedSections] = useState<number | null>(null);
+  const [totalSections, setTotalSections] = useState<number | null>(null);
+  const [copyLabel, setCopyLabel] = useState("Copy Summary");
+
+  const hasResult = Boolean(result);
+
+  const safeAnalysis = useMemo(() => analysis || emptyAnalysis, [analysis]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -21,7 +55,7 @@ export default function HomePage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
       if (droppedFile.type === "application/pdf") {
@@ -30,44 +64,105 @@ export default function HomePage() {
     }
   };
 
+  const resetAnalysis = () => {
+    setFile(null);
+    setResult("");
+    setAnalysis(null);
+    setTruncated(false);
+    setAnalyzedSections(null);
+    setTotalSections(null);
+    setCopyLabel("Copy Summary");
+  };
+
   const handleUpload = async () => {
     if (!file) return;
     setLoading(true);
     setResult("");
+    setAnalysis(null);
+    setTruncated(false);
+    setAnalyzedSections(null);
+    setTotalSections(null);
+    setCopyLabel("Copy Summary");
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
       const res = await fetch("/api/analyze", { method: "POST", body: formData });
-      const data = await res.json();
+      const data: ApiResponse = await res.json();
       setResult(data.summary || "No summary returned.");
+      setAnalysis(data.analysis || null);
+      setTruncated(Boolean(data.truncated));
+      setAnalyzedSections(
+        typeof data.analyzedSections === "number" ? data.analyzedSections : null
+      );
+      setTotalSections(
+        typeof data.totalSections === "number" ? data.totalSections : null
+      );
     } catch (err) {
       console.error(err);
       setResult("Error analyzing file.");
+      setAnalysis(null);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleCopy = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result);
+      setCopyLabel("Copied");
+      setTimeout(() => setCopyLabel("Copy Summary"), 1200);
+    } catch {
+      setCopyLabel("Copy Failed");
+      setTimeout(() => setCopyLabel("Copy Summary"), 1400);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!result) return;
+    const blob = new Blob([result], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.download = `contract-analysis-${stamp}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderList = (items: string[], emptyText: string) => {
+    if (!items.length) {
+      return <p className="text-sm text-slate-500">{emptyText}</p>;
+    }
+
+    return (
+      <ul className="space-y-2">
+        {items.map((item, idx) => (
+          <li key={`${item}-${idx}`} className="text-slate-700 leading-relaxed">
+            - {item}
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
-      {/* Header */}
-      <header className="w-full border-b border-slate-200 bg-white/80 backdrop-blur-sm">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50 to-blue-100 flex flex-col">
+      <header className="w-full border-b border-slate-200 bg-white/85 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600"></div>
             <span className="text-lg font-semibold">ContractAI</span>
           </div>
-          <span className="text-sm text-slate-600">🔒 Secure</span>
+          <span className="text-sm text-slate-600">Secure</span>
         </div>
       </header>
 
-      {/* Main */}
-      <main className="flex-1 max-w-4xl mx-auto px-6 pt-20 pb-32 w-full">
-        {!result ? (
+      <main className="flex-1 max-w-5xl mx-auto px-6 pt-20 pb-32 w-full">
+        {!hasResult ? (
           <>
-            {/* Hero */}
             <div className="text-center mb-12">
               <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6 leading-tight">
                 Understand contracts
@@ -75,13 +170,12 @@ export default function HomePage() {
                 <span className="text-blue-600">in plain English</span>
               </h1>
               <p className="text-xl text-slate-600 max-w-2xl mx-auto">
-                Upload any PDF contract. Get instant AI analysis of key obligations, risks, and deadlines.
+                Upload any PDF contract. Get instant AI analysis of key obligations,
+                risks, and deadlines.
               </p>
             </div>
 
-            {/* Upload Card */}
             <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 max-w-2xl mx-auto">
-              {/* Drag & Drop Zone */}
               <div
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
@@ -101,10 +195,10 @@ export default function HomePage() {
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
-                
+
                 {file ? (
                   <div className="space-y-2">
-                    <div className="text-5xl">✅</div>
+                    <div className="text-3xl font-semibold text-green-700">Ready</div>
                     <p className="font-semibold text-slate-900">{file.name}</p>
                     <p className="text-sm text-slate-500">
                       {(file.size / 1024 / 1024).toFixed(2)} MB
@@ -121,10 +215,8 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <div className="text-5xl">📄</div>
-                    <p className="font-semibold text-slate-900">
-                      Drop your PDF here
-                    </p>
+                    <div className="text-3xl font-semibold text-slate-700">PDF</div>
+                    <p className="font-semibold text-slate-900">Drop your PDF here</p>
                     <p className="text-sm text-slate-500">
                       or click to browse (max 10MB)
                     </p>
@@ -132,7 +224,6 @@ export default function HomePage() {
                 )}
               </div>
 
-              {/* Analyze Button */}
               <button
                 onClick={handleUpload}
                 disabled={!file || loading}
@@ -146,20 +237,19 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Features */}
             <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto">
               <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
-                <div className="text-3xl mb-2">✓</div>
+                <div className="text-xl font-semibold mb-2 text-blue-700">Core Duties</div>
                 <h3 className="font-semibold text-slate-900 mb-1">Key Obligations</h3>
-                <p className="text-sm text-slate-600">What you're committed to</p>
+                <p className="text-sm text-slate-600">What you are committed to</p>
               </div>
               <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
-                <div className="text-3xl mb-2">⚠️</div>
+                <div className="text-xl font-semibold mb-2 text-rose-700">Risk Check</div>
                 <h3 className="font-semibold text-slate-900 mb-1">Risk Analysis</h3>
                 <p className="text-sm text-slate-600">Potential red flags</p>
               </div>
               <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
-                <div className="text-3xl mb-2">📅</div>
+                <div className="text-xl font-semibold mb-2 text-amber-700">Timeline</div>
                 <h3 className="font-semibold text-slate-900 mb-1">Important Dates</h3>
                 <p className="text-sm text-slate-600">Critical deadlines</p>
               </div>
@@ -167,37 +257,126 @@ export default function HomePage() {
           </>
         ) : (
           <div>
-            {/* Results Header */}
-            <div className="flex items-center justify-between mb-8">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-3">
               <h2 className="text-3xl font-bold text-slate-900">Analysis Complete</h2>
-              <button
-                onClick={() => {
-                  setFile(null);
-                  setResult("");
-                }}
-                className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg font-medium transition-colors"
-              >
-                ← New Analysis
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="px-4 py-2 text-slate-700 border border-slate-300 bg-white hover:bg-slate-50 rounded-lg font-medium transition-colors"
+                >
+                  {copyLabel}
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="px-4 py-2 text-slate-700 border border-slate-300 bg-white hover:bg-slate-50 rounded-lg font-medium transition-colors"
+                >
+                  Download TXT
+                </button>
+                <button
+                  onClick={resetAnalysis}
+                  className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg font-medium transition-colors"
+                >
+                  New Analysis
+                </button>
+              </div>
             </div>
 
-            {/* Results Content */}
-            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
-              <div className="prose prose-slate max-w-none">
+            {truncated && (
+              <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900">
+                <p className="font-semibold text-sm">Partial Analysis</p>
+                <p className="text-sm mt-1">
+                  This file was chunked beyond the processing limit.
+                  {analyzedSections && totalSections
+                    ? ` Analyzed ${analyzedSections} of ${totalSections} sections.`
+                    : " Some sections may be omitted."}
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <section className="bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Plain-English Summary
+                  </h3>
+                  <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                    Overview
+                  </span>
+                </div>
+                {renderList(
+                  safeAnalysis.plain_summary,
+                  "No summary bullets were returned."
+                )}
+              </section>
+
+              <section className="bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900">Key Obligations</h3>
+                  <span className="text-xs px-2 py-1 rounded-full bg-cyan-100 text-cyan-700">
+                    Must Do
+                  </span>
+                </div>
+                {renderList(
+                  safeAnalysis.obligations,
+                  "No explicit obligations were identified."
+                )}
+              </section>
+
+              <section className="bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900">Risks or Red Flags</h3>
+                  <span className="text-xs px-2 py-1 rounded-full bg-rose-100 text-rose-700">
+                    Attention
+                  </span>
+                </div>
+                {renderList(
+                  safeAnalysis.risks,
+                  "No major risk indicators were identified."
+                )}
+              </section>
+
+              <section className="bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Important Dates or Deadlines
+                  </h3>
+                  <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                    Timeline
+                  </span>
+                </div>
+                {renderList(
+                  safeAnalysis.deadlines,
+                  "No concrete dates/deadlines were identified."
+                )}
+              </section>
+            </div>
+
+            {safeAnalysis.uncertainty_note && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold">Note:</span>{" "}
+                  {safeAnalysis.uncertainty_note}
+                </p>
+              </div>
+            )}
+
+            {!analysis && (
+              <div className="mt-6 bg-white rounded-2xl shadow-md border border-slate-200 p-6">
+                <h3 className="text-lg font-semibold text-slate-900 mb-3">
+                  Full Text Output
+                </h3>
                 <pre className="whitespace-pre-wrap text-slate-700 leading-relaxed font-sans text-base">
                   {result}
                 </pre>
               </div>
-            </div>
+            )}
           </div>
         )}
       </main>
 
-      {/* Footer */}
       <footer className="bg-slate-900 text-white mt-auto">
         <div className="max-w-6xl mx-auto px-6 py-12">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-            {/* Brand */}
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600"></div>
@@ -208,34 +387,55 @@ export default function HomePage() {
               </p>
             </div>
 
-            {/* Links */}
             <div>
               <h3 className="font-semibold mb-4">Product</h3>
               <ul className="space-y-2 text-sm text-slate-400">
-                <li><a href="#" className="hover:text-white transition-colors">How it works</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Pricing</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">API</a></li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    How it works
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    Pricing
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    API
+                  </a>
+                </li>
               </ul>
             </div>
 
-            {/* Contact */}
             <div>
               <h3 className="font-semibold mb-4">Company</h3>
               <ul className="space-y-2 text-sm text-slate-400">
-                <li><a href="#" className="hover:text-white transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Terms</a></li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    About
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    Privacy
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="hover:text-white transition-colors">
+                    Terms
+                  </a>
+                </li>
               </ul>
             </div>
           </div>
 
-          {/* Bottom Bar */}
           <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-slate-400">
-            <p>© 2024 ContractAI. All rights reserved.</p>
+            <p>Copyright 2024 ContractAI. All rights reserved.</p>
             <p>Your data is encrypted and never stored</p>
           </div>
         </div>
       </footer>
     </div>
   );
-} 
+}
