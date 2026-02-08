@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Hide Next.js dev indicator */
+nextjs-portal {
+  display: none !important;
+}
+
+#__next-build-watcher {
+  display: none !important;
+}
