@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const getOpenAIClient = (): OpenAI => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+  return new OpenAI({ apiKey });
+};
 
 type AnalysisResult = {
   plain_summary: string[];
@@ -184,6 +188,7 @@ const mergeLocally = (analyses: AnalysisResult[]): AnalysisResult => {
 
 export async function POST(req: Request) {
   try {
+    const openai = getOpenAIClient();
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
