@@ -152,6 +152,36 @@ const toSummaryText = (analysis: AnalysisResult): string => {
   return lines.join("\n");
 };
 
+const mergeLocally = (analyses: AnalysisResult[]): AnalysisResult => {
+  const dedupeStrings = (items: string[]): string[] =>
+    Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+
+  const mergedDeadlineEvents = new Map<string, { title: string; date: string; note?: string }>();
+  for (const analysis of analyses) {
+    for (const event of analysis.deadline_events || []) {
+      const key = `${event.date}|${event.title.toLowerCase().trim()}`;
+      if (!mergedDeadlineEvents.has(key)) {
+        mergedDeadlineEvents.set(key, event);
+      }
+    }
+  }
+
+  const uncertaintyNotes = dedupeStrings(
+    analyses
+      .map((analysis) => analysis.uncertainty_note || "")
+      .filter((item) => item.length > 0)
+  );
+
+  return {
+    plain_summary: dedupeStrings(analyses.flatMap((analysis) => analysis.plain_summary)),
+    obligations: dedupeStrings(analyses.flatMap((analysis) => analysis.obligations)),
+    risks: dedupeStrings(analyses.flatMap((analysis) => analysis.risks)),
+    deadlines: dedupeStrings(analyses.flatMap((analysis) => analysis.deadlines)),
+    deadline_events: Array.from(mergedDeadlineEvents.values()),
+    uncertainty_note: uncertaintyNotes.join(" ").trim(),
+  };
+};
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -221,23 +251,97 @@ export async function POST(req: Request) {
     // 128k tokens is roughly <= 200k-300k chars depending on content.
     const CHUNK_SIZE = 30_000;
     const CHUNK_OVERLAP = 1_000;
-    const MAX_CHUNKS = 8;
-
+    const REDUCE_BATCH_SIZE = 8;
     const allChunks = chunkText(text, CHUNK_SIZE, CHUNK_OVERLAP);
-    const wasTruncated = allChunks.length > MAX_CHUNKS;
-    const chunks = wasTruncated ? allChunks.slice(0, MAX_CHUNKS) : allChunks;
+    const chunks = allChunks;
 
-    const chunkSummaries: string[] = [];
+    const normalizeAnalysis = (analysis: AnalysisResult): AnalysisResult => {
+      const fallbackEvents = extractDeadlineEventsFromText(analysis.deadlines);
+      return {
+        ...analysis,
+        deadline_events:
+          analysis.deadline_events && analysis.deadline_events.length > 0
+            ? analysis.deadline_events
+            : fallbackEvents,
+      };
+    };
+
+    const mergeAnalysesWithModel = async (
+      analyses: AnalysisResult[],
+      stageLabel: string
+    ): Promise<AnalysisResult> => {
+      const mergePrompt = `
+You are a legal assistant.
+
+Merge the JSON analyses below into one coherent JSON object with this exact shape:
+{
+  "plain_summary": string[],
+  "obligations": string[],
+  "risks": string[],
+  "deadlines": string[],
+  "deadline_events": [{"title": string, "date": "YYYY-MM-DD", "note": string}],
+  "uncertainty_note": string
+}
+
+Rules:
+- Return JSON only. No markdown.
+- Keep clear, concise, non-duplicate bullets.
+- Preserve important concrete details from any input analysis.
+- Keep deadline_events only for concrete YYYY-MM-DD dates.
+- Set "deadline_events" to [] when no concrete dates exist.
+- Set "uncertainty_note" to "" when nothing is uncertain.
+
+Merge stage: ${stageLabel}
+Input analyses:
+${JSON.stringify(analyses)}
+`;
+
+      const response = await withRetry(
+        () =>
+          openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: mergePrompt }],
+          }),
+        3,
+        2_000
+      );
+
+      const parsed = parseAnalysisJson(response.choices[0].message?.content || "");
+      const normalized = normalizeAnalysis(parsed);
+      const empty = emptyAnalysis();
+      const isEmpty =
+        normalized.plain_summary.length === empty.plain_summary.length &&
+        normalized.obligations.length === empty.obligations.length &&
+        normalized.risks.length === empty.risks.length &&
+        normalized.deadlines.length === empty.deadlines.length &&
+        (normalized.deadline_events || []).length === (empty.deadline_events || []).length &&
+        !(normalized.uncertainty_note || "").trim();
+
+      return isEmpty ? mergeLocally(analyses) : normalized;
+    };
+
+    const chunkAnalyses: AnalysisResult[] = [];
     for (let i = 0; i < chunks.length; i += 1) {
       const chunkPrompt = `
 You are a legal assistant.
 
-Summarize this contract section.
-Return concise bullets for:
-1. Plain-English summary (2-4 bullets)
-2. Key obligations
-3. Risks or red flags
-4. Important dates or deadlines
+Analyze this contract section and return a JSON object with this exact shape:
+{
+  "plain_summary": string[],
+  "obligations": string[],
+  "risks": string[],
+  "deadlines": string[],
+  "deadline_events": [{"title": string, "date": "YYYY-MM-DD", "note": string}],
+  "uncertainty_note": string
+}
+
+Rules:
+- Return JSON only. No markdown.
+- Keep concise bullets, no duplicates.
+- "deadline_events" must include only concrete dates with YYYY-MM-DD.
+- If a deadline has no concrete date, include it in "deadlines" only.
+- Set "deadline_events" to [] when none are concrete.
+- Set "uncertainty_note" to "" when nothing is uncertain.
 
 Section ${i + 1} of ${chunks.length}:
 ${chunks[i]}
@@ -253,65 +357,38 @@ ${chunks[i]}
         2_000
       );
 
-      const chunkSummary =
-        chunkResponse.choices[0].message?.content || "No summary.";
-      chunkSummaries.push(
-        `Section ${i + 1} summary:\n${chunkSummary}`.trim()
+      const parsedChunk = parseAnalysisJson(
+        chunkResponse.choices[0].message?.content || ""
       );
+      chunkAnalyses.push(normalizeAnalysis(parsedChunk));
     }
 
-    const finalPrompt = `
-You are a legal assistant.
+    let currentRound = chunkAnalyses.length ? chunkAnalyses : [emptyAnalysis()];
+    let round = 1;
+    while (currentRound.length > 1) {
+      const nextRound: AnalysisResult[] = [];
+      for (let i = 0; i < currentRound.length; i += REDUCE_BATCH_SIZE) {
+        const group = currentRound.slice(i, i + REDUCE_BATCH_SIZE);
+        if (group.length === 1) {
+          nextRound.push(group[0]);
+          continue;
+        }
+        const merged = await mergeAnalysesWithModel(
+          group,
+          `Round ${round}, group ${Math.floor(i / REDUCE_BATCH_SIZE) + 1}`
+        );
+        nextRound.push(merged);
+      }
+      currentRound = nextRound;
+      round += 1;
+    }
 
-Using the section summaries below, produce a single coherent JSON object with this exact shape:
-{
-  "plain_summary": string[],
-  "obligations": string[],
-  "risks": string[],
-  "deadlines": string[],
-  "deadline_events": [{"title": string, "date": "YYYY-MM-DD", "note": string}],
-  "uncertainty_note": string
-}
-
-Rules:
-- Return JSON only. No markdown.
-- Keep each array concise with clear, non-duplicate bullets.
-- For "deadline_events", include only concrete calendar dates and use ISO format YYYY-MM-DD.
-- If a deadline has no concrete date, keep it in "deadlines" and omit it from "deadline_events".
-- Set "deadline_events" to [] when no concrete dates exist.
-- Set "uncertainty_note" to "" if nothing is uncertain.
-
-Be concise and remove duplicates.
-${wasTruncated ? "Note: Some sections were omitted due to size; mention uncertainty.\n" : ""}
-Section summaries:
-${chunkSummaries.join("\n\n")}
-`;
-
-    const finalResponse = await withRetry(
-      () =>
-        openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [{ role: "user", content: finalPrompt }],
-        }),
-      3,
-      2_000
-    );
-
-    const rawContent = finalResponse.choices[0].message?.content || "";
-    const analysis = parseAnalysisJson(rawContent);
-    const fallbackEvents = extractDeadlineEventsFromText(analysis.deadlines);
-    const normalizedAnalysis: AnalysisResult = {
-      ...analysis,
-      deadline_events:
-        analysis.deadline_events && analysis.deadline_events.length > 0
-          ? analysis.deadline_events
-          : fallbackEvents,
-    };
+    const normalizedAnalysis = currentRound[0] || emptyAnalysis();
     const summary = toSummaryText(normalizedAnalysis);
     return NextResponse.json({
       summary,
       analysis: normalizedAnalysis,
-      truncated: wasTruncated,
+      truncated: false,
       analyzedSections: chunks.length,
       totalSections: allChunks.length,
     });
