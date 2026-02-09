@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   title: "ContractAI - Understand Contracts in Plain English",
   description: "Upload your contract and get instant AI-powered insights. Understand obligations, risks, and deadlines in seconds.",
   icons: {
-    icon: '/favicon.ico',
+    icon: "/icon.svg",
   },
 };
 
