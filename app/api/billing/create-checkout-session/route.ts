@@ -31,6 +31,21 @@ export async function POST(req: Request) {
       );
     }
 
+    const required = [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_PRO_PRICE_ID",
+      "NEXT_PUBLIC_APP_URL",
+    ] as const;
+    const missing = required.filter((name) => !process.env[name]);
+    if (missing.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Missing environment variable(s): ${missing.join(", ")}`,
+        },
+        { status: 500 }
+      );
+    }
+
     const stripeSecret = getEnv("STRIPE_SECRET_KEY");
     const priceId = getEnv("STRIPE_PRO_PRICE_ID");
     const appUrl = getEnv("NEXT_PUBLIC_APP_URL");
@@ -44,6 +59,15 @@ export async function POST(req: Request) {
       cancel_url: `${appUrl}/pricing/cancel`,
       "metadata[plan]": "pro",
     });
+
+    const keyMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";
+    const priceMode = priceId.startsWith("price_") ? null : "invalid";
+    if (priceMode === "invalid") {
+      return NextResponse.json(
+        { error: "STRIPE_PRO_PRICE_ID must be a Stripe price id that starts with price_." },
+        { status: 500 }
+      );
+    }
 
     const stripeResponse = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -61,14 +85,22 @@ export async function POST(req: Request) {
 
     if (!stripeResponse.ok || !stripeData.url) {
       const reason = stripeData.error?.message || "Unable to create checkout session.";
-      return NextResponse.json({ error: reason }, { status: 502 });
+      const enhancedReason =
+        reason.includes("No such price")
+          ? `${reason} Check that STRIPE_PRO_PRICE_ID is from the same Stripe mode as STRIPE_SECRET_KEY (${keyMode}).`
+          : reason;
+      return NextResponse.json({ error: enhancedReason }, { status: 502 });
     }
 
     return NextResponse.json({ url: stripeData.url });
   } catch (error) {
     console.error("create-checkout-session error", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Billing setup is incomplete. Configure Stripe environment variables.";
     return NextResponse.json(
-      { error: "Billing setup is incomplete. Configure Stripe environment variables." },
+      { error: message },
       { status: 500 }
     );
   }
