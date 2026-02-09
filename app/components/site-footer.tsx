@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandLogo } from "./brand-logo";
 
 export function SiteFooter() {
   return (
@@ -7,8 +8,7 @@ export function SiteFooter() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600"></div>
-              <span className="text-xl font-bold">ContractAI</span>
+              <BrandLogo textClassName="text-xl font-bold text-white" iconSize={36} />
             </div>
             <p className="text-slate-400 text-sm">
               AI contract analysis with clear risks, obligations, and deadlines.
