@@ -7,7 +7,7 @@ import { BrandLogo } from "./brand-logo";
 const navLinks = [
   { href: "/how-it-works", label: "How It Works" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/docs/api", label: "API Docs" },
+  { href: "/disclosure", label: "Disclosure" },
 ];
 
 export function SiteHeader() {

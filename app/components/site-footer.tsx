@@ -29,8 +29,8 @@ export function SiteFooter() {
                 </Link>
               </li>
               <li>
-                <Link href="/docs/api" className="hover:text-white transition-colors">
-                  API Docs
+                <Link href="/disclosure" className="hover:text-white transition-colors">
+                  Disclosure
                 </Link>
               </li>
             </ul>
