@@ -9,7 +9,60 @@ type AnalysisResult = {
   obligations: string[];
   risks: string[];
   deadlines: string[];
+  deadline_events?: { title: string; date: string; note?: string }[];
   uncertainty_note?: string;
+};
+
+const toIsoDate = (value: string): string | null => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+};
+
+const extractDeadlineEventsFromText = (
+  deadlines: string[]
+): { title: string; date: string; note?: string }[] => {
+  const events: { title: string; date: string; note?: string }[] = [];
+  const isoRegex = /\b(\d{4}-\d{2}-\d{2})\b/;
+  const monthDayYearRegex =
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b/i;
+  const dayMonthYearRegex =
+    /\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/i;
+
+  for (const item of deadlines) {
+    const isoMatch = item.match(isoRegex)?.[1];
+    const monthDayYear = item.match(monthDayYearRegex)?.[0];
+    const dayMonthYear = item.match(dayMonthYearRegex)?.[0];
+
+    const date =
+      isoMatch ||
+      (monthDayYear ? toIsoDate(monthDayYear) : null) ||
+      (dayMonthYear ? toIsoDate(dayMonthYear) : null);
+
+    if (!date) continue;
+
+    const title = item
+      .replace(isoRegex, "")
+      .replace(monthDayYearRegex, "")
+      .replace(dayMonthYearRegex, "")
+      .replace(/\s+/g, " ")
+      .replace(/^[-:,. ]+|[-:,. ]+$/g, "")
+      .trim();
+
+    events.push({
+      title: title || "Contract deadline",
+      date,
+      note: item,
+    });
+  }
+
+  const unique = new Map<string, { title: string; date: string; note?: string }>();
+  for (const event of events) {
+    const key = `${event.date}|${event.title.toLowerCase()}`;
+    if (!unique.has(key)) unique.set(key, event);
+  }
+
+  return Array.from(unique.values());
 };
 
 const emptyAnalysis = (): AnalysisResult => ({
@@ -17,6 +70,7 @@ const emptyAnalysis = (): AnalysisResult => ({
   obligations: [],
   risks: [],
   deadlines: [],
+  deadline_events: [],
 });
 
 const parseAnalysisJson = (content: string | null | undefined): AnalysisResult => {
@@ -28,6 +82,13 @@ const parseAnalysisJson = (content: string | null | undefined): AnalysisResult =
 
   try {
     const parsed = JSON.parse(candidate);
+    const rawDeadlineEvents = Array.isArray(parsed?.deadline_events)
+      ? (parsed.deadline_events as Array<{
+          title?: unknown;
+          date?: unknown;
+          note?: unknown;
+        }>)
+      : [];
     return {
       plain_summary: Array.isArray(parsed?.plain_summary)
         ? parsed.plain_summary.map(String)
@@ -39,6 +100,18 @@ const parseAnalysisJson = (content: string | null | undefined): AnalysisResult =
       deadlines: Array.isArray(parsed?.deadlines)
         ? parsed.deadlines.map(String)
         : [],
+      deadline_events: rawDeadlineEvents
+        .map((event) => ({
+          title: typeof event?.title === "string" ? event.title : "",
+          date: typeof event?.date === "string" ? event.date : "",
+          note: typeof event?.note === "string" ? event.note : undefined,
+        }))
+        .filter((event: { title: string; date: string }) => {
+          return (
+            event.title.trim().length > 0 &&
+            /^\d{4}-\d{2}-\d{2}$/.test(event.date)
+          );
+        }),
       uncertainty_note:
         typeof parsed?.uncertainty_note === "string"
           ? parsed.uncertainty_note
@@ -114,13 +187,29 @@ export async function POST(req: Request) {
       while (true) {
         try {
           return await fn();
-        } catch (err: any) {
+        } catch (err: unknown) {
           attempt += 1;
-          const status = err?.status || err?.response?.status;
+          const status =
+            typeof err === "object" && err !== null
+              ? Number(
+                  (err as { status?: unknown; response?: { status?: unknown } })
+                    .status ||
+                    (err as { status?: unknown; response?: { status?: unknown } })
+                      .response?.status
+                )
+              : 0;
           if (status !== 429 || attempt > retries) throw err;
+          const headers =
+            typeof err === "object" && err !== null
+              ? (
+                  err as {
+                    headers?: { get?: (key: string) => string | null | undefined };
+                  }
+                ).headers
+              : undefined;
           const retryAfterMs =
-            Number(err?.headers?.get?.("retry-after-ms")) ||
-            Number(err?.headers?.get?.("retry-after")) * 1000 ||
+            Number(headers?.get?.("retry-after-ms")) ||
+            Number(headers?.get?.("retry-after")) * 1000 ||
             0;
           const delay = Math.max(baseDelayMs * attempt, retryAfterMs || 0);
           await sleep(delay);
@@ -180,12 +269,16 @@ Using the section summaries below, produce a single coherent JSON object with th
   "obligations": string[],
   "risks": string[],
   "deadlines": string[],
+  "deadline_events": [{"title": string, "date": "YYYY-MM-DD", "note": string}],
   "uncertainty_note": string
 }
 
 Rules:
 - Return JSON only. No markdown.
 - Keep each array concise with clear, non-duplicate bullets.
+- For "deadline_events", include only concrete calendar dates and use ISO format YYYY-MM-DD.
+- If a deadline has no concrete date, keep it in "deadlines" and omit it from "deadline_events".
+- Set "deadline_events" to [] when no concrete dates exist.
 - Set "uncertainty_note" to "" if nothing is uncertain.
 
 Be concise and remove duplicates.
@@ -206,10 +299,18 @@ ${chunkSummaries.join("\n\n")}
 
     const rawContent = finalResponse.choices[0].message?.content || "";
     const analysis = parseAnalysisJson(rawContent);
-    const summary = toSummaryText(analysis);
+    const fallbackEvents = extractDeadlineEventsFromText(analysis.deadlines);
+    const normalizedAnalysis: AnalysisResult = {
+      ...analysis,
+      deadline_events:
+        analysis.deadline_events && analysis.deadline_events.length > 0
+          ? analysis.deadline_events
+          : fallbackEvents,
+    };
+    const summary = toSummaryText(normalizedAnalysis);
     return NextResponse.json({
       summary,
-      analysis,
+      analysis: normalizedAnalysis,
       truncated: wasTruncated,
       analyzedSections: chunks.length,
       totalSections: allChunks.length,
