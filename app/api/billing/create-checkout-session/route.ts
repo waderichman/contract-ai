@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-
-type CheckoutRequest = {
-  email?: string;
-};
+import { getSessionFromCookies } from "@/lib/auth";
+import { getUserById } from "@/lib/db";
 
 const getEnv = (name: string): string => {
   const value = process.env[name];
@@ -20,13 +18,20 @@ const toFormBody = (entries: Record<string, string>): URLSearchParams => {
   return body;
 };
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    const payload = (await req.json()) as CheckoutRequest;
-    const email = payload.email?.trim().toLowerCase();
-    if (!email) {
+    const session = await getSessionFromCookies();
+    if (!session) {
+      return NextResponse.json({ error: "You must be logged in to upgrade." }, { status: 401 });
+    }
+
+    const user = await getUserById(session.userId);
+    if (!user) {
+      return NextResponse.json({ error: "User not found." }, { status: 401 });
+    }
+    if (!user.email) {
       return NextResponse.json(
-        { error: "Email is required to start checkout." },
+        { error: "Account email is required to start checkout." },
         { status: 400 }
       );
     }
@@ -54,10 +59,12 @@ export async function POST(req: Request) {
       mode: "subscription",
       "line_items[0][price]": priceId,
       "line_items[0][quantity]": "1",
-      customer_email: email,
+      customer_email: user.email,
       success_url: `${appUrl}/pricing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/pricing/cancel`,
       "metadata[plan]": "pro",
+      "metadata[user_id]": user.id,
+      "metadata[user_email]": user.email,
     });
 
     const keyMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";

@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import {
+  updateUserSubscriptionByEmail,
+  updateUserSubscriptionByStripeCustomer,
+} from "@/lib/db";
 
 const verifyStripeSignature = (
   signatureHeader: string,
@@ -37,6 +41,9 @@ type StripeWebhookEvent = {
   data: { object: Record<string, unknown> };
 };
 
+const asString = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
 export async function POST(req: Request) {
   try {
     const signature = req.headers.get("stripe-signature");
@@ -58,16 +65,40 @@ export async function POST(req: Request) {
     const event = JSON.parse(payload) as StripeWebhookEvent;
 
     if (event.type === "checkout.session.completed") {
-      console.log("Stripe checkout complete:", event.id);
-      // TODO: persist entitlement in your user/subscription store.
+      const sessionObject = event.data.object;
+      const email = asString(sessionObject.customer_email);
+      const stripeCustomerId = asString(sessionObject.customer);
+      const stripeSubscriptionId = asString(sessionObject.subscription);
+
+      if (email) {
+        await updateUserSubscriptionByEmail({
+          email: email.toLowerCase(),
+          subscriptionStatus: "active",
+          stripeCustomerId,
+          stripeSubscriptionId,
+        });
+      }
+      console.log("Stripe checkout complete:", event.id, email);
     }
 
     if (
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
-      console.log("Stripe subscription lifecycle:", event.type, event.id);
-      // TODO: sync active/canceled status in your user/subscription store.
+      const subscription = event.data.object;
+      const stripeCustomerId = asString(subscription.customer);
+      const stripeSubscriptionId = asString(subscription.id);
+      const status = asString(subscription.status) || "canceled";
+
+      if (stripeCustomerId) {
+        await updateUserSubscriptionByStripeCustomer({
+          stripeCustomerId,
+          subscriptionStatus: status,
+          stripeSubscriptionId,
+        });
+      }
+
+      console.log("Stripe subscription lifecycle:", event.type, event.id, status);
     }
 
     return NextResponse.json({ received: true });

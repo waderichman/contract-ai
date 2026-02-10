@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse";
+import { getSessionFromCookies } from "@/lib/auth";
+import {
+  getTodayUsageCount,
+  getUserById,
+  hasActiveSubscription,
+  incrementUsage,
+} from "@/lib/db";
 
 const getOpenAIClient = (): OpenAI => {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -188,6 +195,39 @@ const mergeLocally = (analyses: AnalysisResult[]): AnalysisResult => {
 
 export async function POST(req: Request) {
   try {
+    const session = await getSessionFromCookies();
+    if (!session) {
+      return NextResponse.json(
+        { summary: "You must sign in before analyzing contracts." },
+        { status: 401 }
+      );
+    }
+    const user = await getUserById(session.userId);
+    if (!user) {
+      return NextResponse.json(
+        { summary: "Your account was not found. Please sign in again." },
+        { status: 401 }
+      );
+    }
+
+    const FREE_DAILY_LIMIT = 2;
+    const isPro = hasActiveSubscription(user.subscription_status);
+    if (!isPro) {
+      const usedToday = await getTodayUsageCount({
+        userId: user.id,
+        eventName: "analyze_contract",
+      });
+      if (usedToday >= FREE_DAILY_LIMIT) {
+        return NextResponse.json(
+          {
+            summary:
+              "Free plan daily limit reached (2 analyses/day). Upgrade to Pro for higher usage.",
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     const openai = getOpenAIClient();
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -390,6 +430,7 @@ ${chunks[i]}
 
     const normalizedAnalysis = currentRound[0] || emptyAnalysis();
     const summary = toSummaryText(normalizedAnalysis);
+    await incrementUsage({ userId: user.id, eventName: "analyze_contract" });
     return NextResponse.json({
       summary,
       analysis: normalizedAnalysis,

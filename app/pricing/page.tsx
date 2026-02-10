@@ -1,29 +1,45 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SiteFooter } from "../components/site-footer";
 import { SiteHeader } from "../components/site-header";
 
+type MeResponse = {
+  user: {
+    id: string;
+    email: string;
+    subscriptionStatus: string;
+  } | null;
+};
+
 export default function PricingPage() {
-  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [user, setUser] = useState<MeResponse["user"]>(null);
+  const [checkingUser, setCheckingUser] = useState(true);
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const data = (await res.json()) as MeResponse;
+        setUser(data.user);
+      } catch {
+        setUser(null);
+      } finally {
+        setCheckingUser(false);
+      }
+    };
+    void run();
+  }, []);
 
   const startCheckout = async () => {
-    const value = email.trim();
-    if (!value) {
-      setError("Enter your email to continue.");
-      return;
-    }
-
     setError("");
     setLoading(true);
     try {
       const res = await fetch("/api/billing/create-checkout-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: value }),
       });
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
@@ -54,7 +70,7 @@ export default function PricingPage() {
             <p className="text-3xl font-bold text-slate-900 mb-1">$0</p>
             <p className="text-sm text-slate-500 mb-6">For individual use and demos.</p>
             <ul className="space-y-2 text-sm text-slate-700 mb-8">
-              <li>Single contract analysis</li>
+              <li>2 contract analyses per day</li>
               <li>Obligation and risk extraction</li>
               <li>TXT and ICS exports</li>
             </ul>
@@ -76,38 +92,42 @@ export default function PricingPage() {
               <li>Saved analysis history</li>
             </ul>
 
-            <label className="block text-xs text-slate-300 mb-2" htmlFor="billing-email">
-              Work email
-            </label>
-            <input
-              id="billing-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
-              className="w-full px-3 py-2 rounded-lg bg-white text-slate-900 border border-white/30 mb-3 text-sm"
-            />
+            {checkingUser ? (
+              <p className="text-sm text-slate-200 mb-3">Checking account...</p>
+            ) : user ? (
+              <p className="text-sm text-slate-200 mb-3">
+                Signed in as <span className="font-semibold">{user.email}</span>
+              </p>
+            ) : (
+              <p className="text-sm text-amber-200 mb-3">
+                Sign in first to connect subscription to your account.
+              </p>
+            )}
 
             {error && <p className="text-xs text-rose-300 mb-3">{error}</p>}
 
-            <button
-              onClick={startCheckout}
-              disabled={loading}
-              className={`inline-block px-4 py-2 rounded-lg text-sm font-medium ${
-                loading
-                  ? "bg-slate-300 text-slate-700 cursor-not-allowed"
-                  : "bg-white text-slate-900"
-              }`}
-            >
-              {loading ? "Redirecting..." : "Upgrade to Pro"}
-            </button>
+            {user ? (
+              <button
+                onClick={startCheckout}
+                disabled={loading}
+                className={`inline-block px-4 py-2 rounded-lg text-sm font-medium ${
+                  loading
+                    ? "bg-slate-300 text-slate-700 cursor-not-allowed"
+                    : "bg-white text-slate-900"
+                }`}
+              >
+                {loading ? "Redirecting..." : "Upgrade to Pro"}
+              </button>
+            ) : (
+              <Link
+                href="/login"
+                className="inline-block px-4 py-2 rounded-lg text-sm font-medium bg-white text-slate-900"
+              >
+                Sign In to Upgrade
+              </Link>
+            )}
           </section>
         </div>
-
-        <p className="text-xs text-slate-500 mt-6">
-          Subscriptions are processed by Stripe. Pro access enforcement requires a linked
-          user account and entitlement store.
-        </p>
       </main>
       <SiteFooter />
     </div>
