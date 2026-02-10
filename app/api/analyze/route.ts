@@ -210,7 +210,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const FREE_DAILY_LIMIT = 2;
+    // current free amount
+    const FREE_DAILY_LIMIT = 1;
     const isPro = hasActiveSubscription(user.subscription_status);
     if (!isPro) {
       const usedToday = await getTodayUsageCount({
