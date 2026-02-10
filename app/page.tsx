@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
 type AnalysisResult = {
   plain_summary: string[];
@@ -17,6 +18,14 @@ type ApiResponse = {
   truncated?: boolean;
   analyzedSections?: number;
   totalSections?: number;
+};
+
+type MeResponse = {
+  user: {
+    id: string;
+    email: string;
+    subscriptionStatus: string;
+  } | null;
 };
 
 const emptyAnalysis: AnalysisResult = {
@@ -38,8 +47,23 @@ export default function HomePage() {
   const [analyzedSections, setAnalyzedSections] = useState<number | null>(null);
   const [totalSections, setTotalSections] = useState<number | null>(null);
   const [copyLabel, setCopyLabel] = useState("Copy Summary");
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [authNotice, setAuthNotice] = useState("");
 
   const hasResult = Boolean(result);
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const data = (await res.json()) as MeResponse;
+        setSignedIn(Boolean(data.user));
+      } catch {
+        setSignedIn(false);
+      }
+    };
+    void run();
+  }, []);
 
   const safeAnalysis = useMemo(() => analysis || emptyAnalysis, [analysis]);
   const hasCalendarEvents =
@@ -101,10 +125,17 @@ export default function HomePage() {
     setAnalyzedSections(null);
     setTotalSections(null);
     setCopyLabel("Copy Summary");
+    setAuthNotice("");
   };
 
   const handleUpload = async () => {
     if (!file) return;
+    if (signedIn !== true) {
+      setAuthNotice("Please sign in to analyze contracts.");
+      return;
+    }
+
+    setAuthNotice("");
     setLoading(true);
     setResult("");
     setAnalysis(null);
@@ -112,6 +143,7 @@ export default function HomePage() {
     setAnalyzedSections(null);
     setTotalSections(null);
     setCopyLabel("Copy Summary");
+    setAuthNotice("");
 
     const formData = new FormData();
     formData.append("file", file);
@@ -119,6 +151,12 @@ export default function HomePage() {
     try {
       const res = await fetch("/api/analyze", { method: "POST", body: formData });
       const data: ApiResponse = await res.json();
+      if (res.status === 401) {
+        setAuthNotice(data.summary || "Please sign in to analyze contracts.");
+        setResult("");
+        setAnalysis(null);
+        return;
+      }
       setResult(data.summary || "No summary returned.");
       setAnalysis(data.analysis || null);
       setTruncated(Boolean(data.truncated));
@@ -250,7 +288,10 @@ export default function HomePage() {
                 <input
                   type="file"
                   accept="application/pdf"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] || null);
+                    setAuthNotice("");
+                  }}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
 
@@ -282,16 +323,31 @@ export default function HomePage() {
                 )}
               </div>
 
+              {signedIn === false && (
+                <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  Sign in is required before analyzing contracts.{" "}
+                  <Link href="/login" className="font-semibold underline">
+                    Login
+                  </Link>
+                </div>
+              )}
+
+              {authNotice && (
+                <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  {authNotice}
+                </div>
+              )}
+
               <button
                 onClick={handleUpload}
-                disabled={!file || loading}
+                disabled={!file || loading || signedIn !== true}
                 className={`w-full mt-6 py-4 rounded-xl font-semibold text-white transition-all ${
-                  file && !loading
+                  file && !loading && signedIn === true
                     ? "bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl"
                     : "bg-slate-300 cursor-not-allowed"
                 }`}
               >
-                {loading ? "Analyzing..." : "Analyze Contract"}
+                {loading ? "Analyzing..." : signedIn === true ? "Analyze Contract" : "Sign in to Analyze"}
               </button>
             </div>
 
@@ -473,6 +529,8 @@ export default function HomePage() {
     </div>
   );
 }
+
+
 
 
 
