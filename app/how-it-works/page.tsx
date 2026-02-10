@@ -1,10 +1,7 @@
-import { SiteFooter } from "../components/site-footer";
-import { SiteHeader } from "../components/site-header";
-
+﻿
 export default function HowItWorksPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-cyan-50 flex flex-col">
-      <SiteHeader />
       <main className="flex-1 max-w-5xl mx-auto px-6 py-16 w-full">
         <h1 className="text-4xl font-bold text-slate-900 mb-4">How ContractAI Works</h1>
         <p className="text-slate-600 mb-10 max-w-3xl">
@@ -39,7 +36,10 @@ export default function HowItWorksPage() {
           </section>
         </div>
       </main>
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+

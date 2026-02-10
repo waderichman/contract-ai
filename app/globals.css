@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  overflow-y: scroll;
+}
+
 /* Hide Next.js dev indicator */
 nextjs-portal {
   display: none !important;

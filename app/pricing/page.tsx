@@ -1,9 +1,7 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { SiteFooter } from "../components/site-footer";
-import { SiteHeader } from "../components/site-header";
 
 type MeResponse = {
   user: {
@@ -56,7 +54,6 @@ export default function PricingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-blue-50 flex flex-col">
-      <SiteHeader />
       <main className="flex-1 max-w-5xl mx-auto px-6 py-16 w-full">
         <h1 className="text-4xl font-bold text-slate-900 mb-4">Pricing</h1>
         <p className="text-slate-600 mb-10 max-w-2xl">
@@ -129,7 +126,10 @@ export default function PricingPage() {
           </section>
         </div>
       </main>
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+

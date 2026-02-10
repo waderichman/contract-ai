@@ -1,10 +1,7 @@
-import { SiteFooter } from "../components/site-footer";
-import { SiteHeader } from "../components/site-header";
-
+﻿
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-blue-50 flex flex-col">
-      <SiteHeader />
       <main className="flex-1 max-w-4xl mx-auto px-6 py-16 w-full">
         <h1 className="text-4xl font-bold text-slate-900 mb-4">About ContractAI</h1>
         <p className="text-slate-700 leading-relaxed mb-4">
@@ -16,7 +13,10 @@ export default function AboutPage() {
           key obligations, and deadline extraction for calendar workflows.
         </p>
       </main>
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+

@@ -23,6 +23,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<MeResponse["user"]>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     const run = async () => {
@@ -32,6 +33,8 @@ export function SiteHeader() {
         setUser(data.user);
       } catch {
         setUser(null);
+      } finally {
+        setAuthReady(true);
       }
     };
     void run();
@@ -69,15 +72,17 @@ export function SiteHeader() {
           })}
         </nav>
 
-        <div className="flex items-center gap-2">
-          {user ? (
+        <div className="flex items-center justify-end gap-2 min-w-[230px]">
+          {!authReady ? (
+            <div className="h-9 w-full rounded-lg bg-slate-100 animate-pulse" />
+          ) : user ? (
             <>
               <span className="hidden md:inline text-xs text-slate-600">
                 {user.email} ({user.subscriptionStatus || "free"})
               </span>
               <button
                 onClick={logout}
-                className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
+                className="h-9 min-w-[88px] text-sm font-medium px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
               >
                 Logout
               </button>
@@ -86,13 +91,13 @@ export function SiteHeader() {
             <>
               <Link
                 href="/login"
-                className="text-sm font-medium px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
+                className="h-9 min-w-[88px] inline-flex items-center justify-center text-sm font-medium px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
               >
                 Login
               </Link>
               <Link
                 href="/signup"
-                className="text-sm font-medium px-3 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+                className="h-9 min-w-[88px] inline-flex items-center justify-center text-sm font-medium px-3 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
               >
                 Sign Up
               </Link>

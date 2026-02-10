@@ -1,10 +1,8 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { SiteFooter } from "../components/site-footer";
-import { SiteHeader } from "../components/site-header";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -38,7 +36,6 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-cyan-50 flex flex-col">
-      <SiteHeader />
       <main className="flex-1 max-w-md mx-auto px-6 py-16 w-full">
         <h1 className="text-3xl font-bold text-slate-900 mb-2">Create account</h1>
         <p className="text-sm text-slate-600 mb-6">
@@ -79,7 +76,10 @@ export default function SignupPage() {
           </p>
         </div>
       </main>
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+

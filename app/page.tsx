@@ -1,8 +1,6 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
-import { SiteFooter } from "./components/site-footer";
-import { SiteHeader } from "./components/site-header";
 
 type AnalysisResult = {
   plain_summary: string[];
@@ -220,8 +218,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50 to-blue-100 flex flex-col">
-      <SiteHeader />
-
       <main className="flex-1 max-w-5xl mx-auto px-6 pt-20 pb-32 w-full">
         {!hasResult ? (
           <>
@@ -474,8 +470,10 @@ export default function HomePage() {
           </div>
         )}
       </main>
-
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+

@@ -1,11 +1,8 @@
-import Link from "next/link";
-import { SiteFooter } from "../../components/site-footer";
-import { SiteHeader } from "../../components/site-header";
+﻿import Link from "next/link";
 
 export default function PricingCancelPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-rose-50 flex flex-col">
-      <SiteHeader />
       <main className="flex-1 max-w-3xl mx-auto px-6 py-16 w-full">
         <div className="bg-white border border-slate-200 rounded-2xl p-8">
           <p className="text-sm font-semibold text-amber-700 mb-2">Checkout Canceled</p>
@@ -21,7 +18,10 @@ export default function PricingCancelPage() {
           </Link>
         </div>
       </main>
-      <SiteFooter />
     </div>
   );
 }
+
+
+
+
