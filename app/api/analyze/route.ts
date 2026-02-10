@@ -222,7 +222,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             summary:
-              "Free plan daily limit reached (2 analyses/day). Upgrade to Pro for higher usage.",
+              "Free plan daily limit reached (1 analyses/day). Upgrade to Pro for higher usage.",
           },
           { status: 429 }
         );
