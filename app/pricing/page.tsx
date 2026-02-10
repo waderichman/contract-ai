@@ -67,7 +67,7 @@ export default function PricingPage() {
             <p className="text-3xl font-bold text-slate-900 mb-1">$0</p>
             <p className="text-sm text-slate-500 mb-6">For individual use and demos.</p>
             <ul className="space-y-2 text-sm text-slate-700 mb-8">
-              <li>2 contract analyses per day</li>
+              <li>1 contract analyses per day</li>
               <li>Obligation and risk extraction</li>
               <li>TXT and ICS exports</li>
             </ul>
