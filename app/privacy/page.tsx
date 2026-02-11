@@ -14,10 +14,6 @@ export default function PrivacyPage() {
           usage, and estimated API cost). We do not save full contract contents as part
           of that usage tracking.
         </p>
-        <p className="text-slate-600 leading-relaxed mb-4">
-          Contract text is sent to our AI provider only for processing your request.
-          Their handling is governed by their own terms and policies.
-        </p>
         <p className="text-slate-600 leading-relaxed">
           Do not upload documents you are not authorized to share. If you need stricter
           retention or data residency guarantees, add explicit storage, deletion, and
