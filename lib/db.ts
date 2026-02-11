@@ -31,8 +31,28 @@ const ensureSchema = async () => {
       id BIGSERIAL PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       event_name TEXT NOT NULL,
+      model TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      estimated_cost_usd DOUBLE PRECISION,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `;
+  await sql`
+    ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS model TEXT;
+  `;
+  await sql`
+    ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+  `;
+  await sql`
+    ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+  `;
+  await sql`
+    ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS estimated_cost_usd DOUBLE PRECISION;
   `;
   await sql`
     CREATE INDEX IF NOT EXISTS idx_usage_events_user_event_created
@@ -106,11 +126,32 @@ export const updateUserSubscriptionByStripeCustomer = async (input: {
   `;
 };
 
-export const incrementUsage = async (input: { userId: string; eventName: string }) => {
+export const incrementUsage = async (input: {
+  userId: string;
+  eventName: string;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  estimatedCostUsd?: number | null;
+}) => {
   await ensureSchema();
   await sql`
-    INSERT INTO usage_events (user_id, event_name)
-    VALUES (${input.userId}, ${input.eventName});
+    INSERT INTO usage_events (
+      user_id,
+      event_name,
+      model,
+      input_tokens,
+      output_tokens,
+      estimated_cost_usd
+    )
+    VALUES (
+      ${input.userId},
+      ${input.eventName},
+      ${input.model || null},
+      ${input.inputTokens ?? null},
+      ${input.outputTokens ?? null},
+      ${input.estimatedCostUsd ?? null}
+    );
   `;
 };
 
@@ -124,6 +165,49 @@ export const getTodayUsageCount = async (input: { userId: string; eventName: str
       AND created_at >= date_trunc('day', now());
   `;
   return result.rows[0]?.count || 0;
+};
+
+export const getUsageCountSince = async (input: {
+  userId: string;
+  eventName: string;
+  sinceIso: string;
+}) => {
+  await ensureSchema();
+  const result = await sql<{ count: number }>`
+    SELECT COUNT(*)::int AS count
+    FROM usage_events
+    WHERE user_id = ${input.userId}
+      AND event_name = ${input.eventName}
+      AND created_at >= ${input.sinceIso}::timestamptz;
+  `;
+  return result.rows[0]?.count || 0;
+};
+
+export const getMonthlyUsageCount = async (input: { userId: string; eventName: string }) => {
+  await ensureSchema();
+  const result = await sql<{ count: number }>`
+    SELECT COUNT(*)::int AS count
+    FROM usage_events
+    WHERE user_id = ${input.userId}
+      AND event_name = ${input.eventName}
+      AND created_at >= date_trunc('month', now());
+  `;
+  return result.rows[0]?.count || 0;
+};
+
+export const getMonthlyUsageCostUsd = async (input: {
+  userId: string;
+  eventName: string;
+}) => {
+  await ensureSchema();
+  const result = await sql<{ total: number | null }>`
+    SELECT COALESCE(SUM(estimated_cost_usd), 0)::float8 AS total
+    FROM usage_events
+    WHERE user_id = ${input.userId}
+      AND event_name = ${input.eventName}
+      AND created_at >= date_trunc('month', now());
+  `;
+  return Number(result.rows[0]?.total || 0);
 };
 
 export const hasActiveSubscription = (status: string | null | undefined): boolean =>

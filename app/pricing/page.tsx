@@ -57,8 +57,8 @@ export default function PricingPage() {
       <main className="flex-1 max-w-5xl mx-auto px-6 py-16 w-full">
         <h1 className="text-4xl font-bold text-slate-900 mb-4">Pricing</h1>
         <p className="text-slate-600 mb-10 max-w-2xl">
-          Start free and upgrade when you need higher usage limits and subscription-backed
-          features.
+          Start free and upgrade when you need higher analysis limits with fair-use
+          protections.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -67,7 +67,7 @@ export default function PricingPage() {
             <p className="text-3xl font-bold text-slate-900 mb-1">$0</p>
             <p className="text-sm text-slate-500 mb-6">For individual use and demos.</p>
             <ul className="space-y-2 text-sm text-slate-700 mb-8">
-              <li>1 contract analyses per day</li>
+              <li>1 contract analysis per day</li>
               <li>Obligation and risk extraction</li>
               <li>TXT and ICS exports</li>
             </ul>
@@ -84,9 +84,9 @@ export default function PricingPage() {
             <p className="text-3xl font-bold mb-1">$9.99/mo</p>
             <p className="text-sm text-slate-300 mb-6">For recurring contract workflows.</p>
             <ul className="space-y-2 text-sm text-slate-200 mb-6">
-              <li>Higher upload limits</li>
-              <li>Priority processing</li>
-              <li>Saved analysis history</li>
+              <li>Up to 20 analyses per day</li>
+              <li>Up to 300 analyses per month</li>
+              <li>Fair-use rate limits and usage safeguards</li>
             </ul>
 
             {checkingUser ? (
@@ -129,7 +129,6 @@ export default function PricingPage() {
     </div>
   );
 }
-
 
 
 

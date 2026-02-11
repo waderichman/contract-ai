@@ -3,6 +3,9 @@ import OpenAI from "openai";
 import pdfParse from "pdf-parse";
 import { getSessionFromCookies } from "@/lib/auth";
 import {
+  getMonthlyUsageCostUsd,
+  getMonthlyUsageCount,
+  getUsageCountSince,
   getTodayUsageCount,
   getUserById,
   hasActiveSubscription,
@@ -23,6 +26,21 @@ type AnalysisResult = {
   deadline_events?: { title: string; date: string; note?: string }[];
   uncertainty_note?: string;
 };
+
+const USAGE_EVENT_NAME = "analyze_contract";
+const MODEL_NAME = "gpt-4o-mini";
+const MODEL_INPUT_PRICE_PER_MILLION = 0.15;
+const MODEL_OUTPUT_PRICE_PER_MILLION = 0.6;
+
+const FREE_DAILY_LIMIT = 1;
+const PRO_DAILY_LIMIT = 20;
+const PRO_MONTHLY_LIMIT = 300;
+const PRO_MONTHLY_SPEND_CAP_USD = 6;
+const MAX_REQUESTS_PER_10_MINUTES = 5;
+
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_TEXT_CHARS = 200_000;
+const MAX_CHUNKS = 20;
 
 const toIsoDate = (value: string): string | null => {
   const parsed = new Date(value);
@@ -210,37 +228,125 @@ export async function POST(req: Request) {
       );
     }
 
-    // current free amount
-    const FREE_DAILY_LIMIT = 1;
     const isPro = hasActiveSubscription(user.subscription_status);
-    if (!isPro) {
-      const usedToday = await getTodayUsageCount({
-        userId: user.id,
-        eventName: "analyze_contract",
-      });
-      if (usedToday >= FREE_DAILY_LIMIT) {
-        return NextResponse.json(
-          {
-            summary:
-              "Free plan daily limit reached (1 analyses/day). Upgrade to Pro for higher usage.",
-          },
-          { status: 429 }
-        );
-      }
+    const tenMinutesAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const [recentCount, usedToday, usedThisMonth, spentThisMonthUsd] =
+      await Promise.all([
+        getUsageCountSince({
+          userId: user.id,
+          eventName: USAGE_EVENT_NAME,
+          sinceIso: tenMinutesAgoIso,
+        }),
+        getTodayUsageCount({
+          userId: user.id,
+          eventName: USAGE_EVENT_NAME,
+        }),
+        isPro
+          ? getMonthlyUsageCount({
+              userId: user.id,
+              eventName: USAGE_EVENT_NAME,
+            })
+          : Promise.resolve(0),
+        isPro
+          ? getMonthlyUsageCostUsd({
+              userId: user.id,
+              eventName: USAGE_EVENT_NAME,
+            })
+          : Promise.resolve(0),
+      ]);
+
+    if (recentCount >= MAX_REQUESTS_PER_10_MINUTES) {
+      return NextResponse.json(
+        {
+          summary:
+            "Rate limit reached (5 analyses per 10 minutes). Please wait and try again.",
+        },
+        { status: 429 }
+      );
+    }
+
+    if (!isPro && usedToday >= FREE_DAILY_LIMIT) {
+      return NextResponse.json(
+        {
+          summary:
+            "Free plan daily limit reached (1 analysis/day). Upgrade to Pro for higher usage.",
+        },
+        { status: 429 }
+      );
+    }
+
+    if (isPro && usedToday >= PRO_DAILY_LIMIT) {
+      return NextResponse.json(
+        {
+          summary:
+            "Pro daily limit reached (20 analyses/day). Please try again tomorrow.",
+        },
+        { status: 429 }
+      );
+    }
+
+    if (isPro && usedThisMonth >= PRO_MONTHLY_LIMIT) {
+      return NextResponse.json(
+        {
+          summary:
+            "Pro monthly limit reached (300 analyses/month). Contact support for higher limits.",
+        },
+        { status: 429 }
+      );
+    }
+
+    if (isPro && spentThisMonthUsd >= PRO_MONTHLY_SPEND_CAP_USD) {
+      return NextResponse.json(
+        {
+          summary:
+            "Pro monthly usage cap reached for this billing cycle. Contact support to raise your limit.",
+        },
+        { status: 429 }
+      );
     }
 
     const openai = getOpenAIClient();
     const formData = await req.formData();
     const file = formData.get("file") as File;
 
-    if (!file) return NextResponse.json({ summary: "No file uploaded." });
+    if (!file) {
+      return NextResponse.json({ summary: "No file uploaded." }, { status: 400 });
+    }
+    if (file.type !== "application/pdf") {
+      return NextResponse.json(
+        { summary: "Only PDF files are supported." },
+        { status: 400 }
+      );
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        { summary: "File too large. Maximum upload size is 2MB." },
+        { status: 413 }
+      );
+    }
 
     // Convert uploaded file to a buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
     // Parse PDF from buffer (no file path!)
     const pdfData = await pdfParse(buffer);
-    const text = pdfData.text;
+    const text = (pdfData.text || "").trim();
+    if (!text) {
+      return NextResponse.json(
+        { summary: "The PDF appears empty or unreadable." },
+        { status: 400 }
+      );
+    }
+    if (text.length > MAX_TEXT_CHARS) {
+      return NextResponse.json(
+        {
+          summary:
+            "This document is too large to analyze on your plan. Please upload a shorter contract.",
+        },
+        { status: 413 }
+      );
+    }
 
     const chunkText = (input: string, size: number, overlap: number) => {
       if (size <= overlap) throw new Error("Chunk size must be > overlap.");
@@ -299,7 +405,27 @@ export async function POST(req: Request) {
     const CHUNK_OVERLAP = 1_000;
     const REDUCE_BATCH_SIZE = 8;
     const allChunks = chunkText(text, CHUNK_SIZE, CHUNK_OVERLAP);
+    if (allChunks.length > MAX_CHUNKS) {
+      return NextResponse.json(
+        {
+          summary:
+            "This contract is too large for a single analysis (max 20 sections). Please split it and try again.",
+        },
+        { status: 413 }
+      );
+    }
     const chunks = allChunks;
+    const usageTotals = { inputTokens: 0, outputTokens: 0 };
+    const addUsageFromResponse = (response: {
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    }) => {
+      const promptTokens = Number(response.usage?.prompt_tokens || 0);
+      const completionTokens = Number(response.usage?.completion_tokens || 0);
+      usageTotals.inputTokens += Number.isFinite(promptTokens) ? promptTokens : 0;
+      usageTotals.outputTokens += Number.isFinite(completionTokens)
+        ? completionTokens
+        : 0;
+    };
 
     const normalizeAnalysis = (analysis: AnalysisResult): AnalysisResult => {
       const fallbackEvents = extractDeadlineEventsFromText(analysis.deadlines);
@@ -345,12 +471,13 @@ ${JSON.stringify(analyses)}
       const response = await withRetry(
         () =>
           openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: MODEL_NAME,
             messages: [{ role: "user", content: mergePrompt }],
           }),
         3,
         2_000
       );
+      addUsageFromResponse(response);
 
       const parsed = parseAnalysisJson(response.choices[0].message?.content || "");
       const normalized = normalizeAnalysis(parsed);
@@ -396,12 +523,13 @@ ${chunks[i]}
       const chunkResponse = await withRetry(
         () =>
           openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: MODEL_NAME,
             messages: [{ role: "user", content: chunkPrompt }],
           }),
         3,
         2_000
       );
+      addUsageFromResponse(chunkResponse);
 
       const parsedChunk = parseAnalysisJson(
         chunkResponse.choices[0].message?.content || ""
@@ -431,7 +559,18 @@ ${chunks[i]}
 
     const normalizedAnalysis = currentRound[0] || emptyAnalysis();
     const summary = toSummaryText(normalizedAnalysis);
-    await incrementUsage({ userId: user.id, eventName: "analyze_contract" });
+    const estimatedCostUsd =
+      (usageTotals.inputTokens / 1_000_000) * MODEL_INPUT_PRICE_PER_MILLION +
+      (usageTotals.outputTokens / 1_000_000) * MODEL_OUTPUT_PRICE_PER_MILLION;
+
+    await incrementUsage({
+      userId: user.id,
+      eventName: USAGE_EVENT_NAME,
+      model: MODEL_NAME,
+      inputTokens: usageTotals.inputTokens,
+      outputTokens: usageTotals.outputTokens,
+      estimatedCostUsd: Number(estimatedCostUsd.toFixed(6)),
+    });
     return NextResponse.json({
       summary,
       analysis: normalizedAnalysis,
