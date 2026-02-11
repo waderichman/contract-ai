@@ -317,7 +317,7 @@ export default function HomePage() {
                     <div className="text-3xl font-semibold text-slate-700">PDF</div>
                     <p className="font-semibold text-slate-900">Drop your PDF here</p>
                     <p className="text-sm text-slate-500">
-                      or click to browse (max 10MB)
+                      or click to browse (max 2MB)
                     </p>
                   </div>
                 )}
