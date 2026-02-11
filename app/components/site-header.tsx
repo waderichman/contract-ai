@@ -8,6 +8,7 @@ import { BrandLogo } from "./brand-logo";
 const navLinks = [
   { href: "/how-it-works", label: "How It Works" },
   { href: "/pricing", label: "Pricing" },
+  { href: "/contact", label: "Contact" },
   { href: "/disclosure", label: "Disclosure" },
 ];
 
